@@ -1,0 +1,128 @@
+name: Ultimate-Win10-CRD-Counter-Optimized
+
+on: 
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      
+      # -----------------------------------------------------------
+      # خطوة 1: تثبيت المتطلبات الأساسية
+      # -----------------------------------------------------------
+      - name: Install Prerequisites (Chrome, CRD, VBox)
+        shell: pwsh
+        run: |
+          Write-Host "⬇️ Downloading Chrome..."
+          Invoke-WebRequest -Uri "https://dl.google.com/chrome/install/latest/chrome_installer.exe" -OutFile "chrome_installer.exe"
+          Start-Process -FilePath "chrome_installer.exe" -Args "/silent /install" -Wait
+          
+          Write-Host "⬇️ Downloading CRD Host..."
+          Invoke-WebRequest -Uri "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" -OutFile "crd.msi"
+          Start-Process -FilePath "msiexec.exe" -Args "/i crd.msi /quiet /qn" -Wait
+
+          Write-Host "⬇️ Downloading VirtualBox..."
+          $vboxUrl = "https://download.virtualbox.org/virtualbox/6.1.48/VirtualBox-6.1.48-159471-Win.exe"
+          (New-Object System.Net.WebClient).DownloadFile($vboxUrl, "VirtualBox-Setup.exe")
+          Start-Process -FilePath "VirtualBox-Setup.exe" -Args "--silent --ignore-reboot" -Wait
+          Write-Host "✅ All Software Installed Successfully."
+
+      # -----------------------------------------------------------
+      # خطوة 2: إدارة العداد
+      # -----------------------------------------------------------
+      - name: Manage External Counter (Gist)
+        shell: pwsh
+        env:
+          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+          GIST_ID: ${{ secrets.GIST_ID }}
+        run: |
+          $headers = @{ "Authorization" = "token $env:GIST_TOKEN"; "Accept" = "application/vnd.github.v3+json" }
+          $url = "https://api.github.com/gists/$env:GIST_ID"
+          $success = $false
+          
+          while (-not $success) {
+              try {
+                  $response = Invoke-RestMethod -Uri $url -Headers $headers -Method Get -ErrorAction Stop
+                  $currentCount = [int]$response.files."counter.txt".content
+                  $newCount = $currentCount + 1
+                  
+                  $body = @{ files = @{ "counter.txt" = @{ content = [string]$newCount } } } | ConvertTo-Json -Depth 10
+                  Invoke-RestMethod -Uri $url -Headers $headers -Method Patch -Body $body -ErrorAction Stop
+                  
+                  echo "DEVICE_NUM=$newCount" >> $env:GITHUB_ENV
+                  Write-Host "✅ Counter Updated to: $newCount"
+                  $success = $true
+              }
+              catch {
+                  Start-Sleep -Seconds (Get-Random -Minimum 1 -Maximum 5)
+              }
+          }
+
+      # -----------------------------------------------------------
+      # خطوة 3: تفعيل الريموت ديسكتوب
+      # -----------------------------------------------------------
+      - name: Start Chrome Remote Desktop
+        shell: pwsh
+        env:
+          CRD_CODE: ${{ secrets.CRD_CODE4 }}
+          CRD_PIN: ${{ secrets.CRD_PIN }}
+        run: |
+          $exePath = "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
+          $UniqueName = "${{ github.actor }}-Machine-${{ env.DEVICE_NUM }}"
+          
+          Write-Host "🚀 STARTING RDP SERVICE: $UniqueName"
+          & $exePath --code="$env:CRD_CODE" --redirect-url="https://remotedesktop.google.com/_/oauthredirect" --name="$UniqueName" --pin=$env:CRD_PIN
+
+      # -----------------------------------------------------------
+      # خطوة 4: تحميل وفك الضغط (تم إصلاح الخطأ هنا)
+      # -----------------------------------------------------------
+      - name: Download and Extract OS
+        shell: cmd
+        run: |
+          @echo off
+          cd /d "%USERPROFILE%\Desktop"
+          set "FILE_URL=https://huggingface.co/datasets/gfdg34fsd/rdp/resolve/main/wino.zip"
+          echo ⬇️ Downloading large file...
+          curl -L -o BigFile.zip "%FILE_URL%"
+          echo 📦 Extracting files...
+          7z x BigFile.zip -y
+          del BigFile.zip
+          echo ✅ Download and Extraction Complete.
+
+# -----------------------------------------------------------
+      # خطوة 5: تسجيل النظام وتشغيله (بدون نسخ)
+      # -----------------------------------------------------------
+      - name: Register and Start VM
+        shell: pwsh
+        run: |
+          $vboxManage = "$env:ProgramFiles\Oracle\VirtualBox\VBoxManage.exe"
+          $winFolder = "$env:USERPROFILE\Desktop\wino"
+          
+          # البحث عن ملف VBox
+          $vboxFile = Get-ChildItem -Path $winFolder -Filter *.vbox -Recurse | Select-Object -First 1
+          
+          if ($vboxFile) {
+              $vmPath = $vboxFile.FullName
+              $originalVmName = $vboxFile.BaseName
+              
+              # 1. تسجيل النسخة
+              Write-Host "📦 Registering VM ($originalVmName)..."
+              & $vboxManage registervm "$vmPath"
+
+              # 2. تشغيل النسخة
+              Write-Host "🚀 Starting VM..."
+              & $vboxManage startvm "$originalVmName" --type gui
+              
+              Write-Host "✅ VM Started Successfully!"
+          } else {
+              Write-Error "❌ Could not find a .vbox file inside the folder."
+          }
+      # -----------------------------------------------------------
+      # خطوة 6: البقاء
+      # -----------------------------------------------------------
+      - name: Keep Alive
+        shell: pwsh
+        run: |
+          Write-Host "✅ Both VMs are running..."
+          while ($true) { Start-Sleep -Seconds 300 }
